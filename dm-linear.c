@@ -4,7 +4,6 @@
  * This file is released under the GPL.
  */
 
-#include "dm.h"
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/blkdev.h>
