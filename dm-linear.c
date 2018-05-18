@@ -1,6 +1,8 @@
 /*
  * Copyright (C) 2001-2003 Sistina Software (UK) Limited.
  *
+ * (c) 2018, vt@altlinux.org: secure deletion on discard
+ *
  * This file is released under the GPL.
  */
 
@@ -10,8 +12,13 @@
 #include <linux/bio.h>
 #include <linux/slab.h>
 #include <linux/device-mapper.h>
+#include <linux/random.h>
 
-#define DM_MSG_PREFIX "linear"
+MODULE_AUTHOR("<vt@altlinux.org>");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("dm-linear with secure deletion on discard");
+
+#define DM_MSG_PREFIX "secdel"
 
 /*
  * Linear: maps a linear range of a device.
@@ -55,6 +62,9 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad;
 	}
 
+	/* permit discards no matter if underlying device supports them */
+	ti->discards_supported = 1;
+
 	ti->num_flush_bios = 1;
 	ti->num_discard_bios = 1;
 	ti->num_write_same_bios = 1;
@@ -91,10 +101,112 @@ static void linear_map_bio(struct dm_target *ti, struct bio *bio)
 			linear_map_sector(ti, bio->bi_iter.bi_sector);
 }
 
+static void bio_end_erase(struct bio *bio)
+{
+	struct bio_vec *bvec;
+	int i;
+
+	if (bio->bi_error)
+		DMERR("bio_end_erase %lu[%u] error=%d",
+		    bio->bi_iter.bi_sector,
+		    bio->bi_iter.bi_size >> 9,
+		    bio->bi_error);
+	bio_for_each_segment_all(bvec, bio, i)
+		if (bvec->bv_page != ZERO_PAGE(0))
+			__free_page(bvec->bv_page);
+	bio_put(bio);
+}
+
+/*
+ * send amount of masking data to the device
+ * @mode: 0 to write zeros, otherwise to write random data
+ */
+static int issue_erase(struct block_device *bdev, sector_t sector,
+    sector_t nr_sects, gfp_t gfp_mask, int mode)
+{
+	int ret = 0;
+	struct bio *bio;
+	unsigned int sz;
+
+	while (nr_sects) {
+		DMDEBUG("bio_alloc<%lu[%lu]> %lu", sector, nr_sects,
+		    min(nr_sects, (sector_t)BIO_MAX_PAGES));
+
+		bio = bio_alloc(gfp_mask,
+		    min(nr_sects, (sector_t)BIO_MAX_PAGES));
+		if (!bio) {
+			DMERR("issue_erase %lu[%lu]: no memory to allocate bio",
+			    sector, nr_sects);
+			ret = -ENOMEM;
+			break;
+		}
+
+		bio->bi_iter.bi_sector = sector;
+		bio->bi_bdev   = bdev;
+		bio->bi_end_io = bio_end_erase;
+
+		while (nr_sects != 0) {
+			struct page *page = NULL;
+
+			sz = min((sector_t) PAGE_SIZE >> 9, nr_sects);
+			if (mode) {
+				page = alloc_page(gfp_mask);
+				if (!page) {
+					DMERR("issue_erase %lu[%lu]: no memory to allocate page for random data",
+					    sector, nr_sects);
+					/* fallback to zero filling */
+				} else {
+					void *ptr;
+
+					ptr = kmap_atomic(page);
+					get_random_bytes(ptr, sz << 9);
+					kunmap_atomic(ptr);
+				}
+			}
+			if (!page)
+				page = ZERO_PAGE(0);
+			ret = bio_add_page(bio, page, sz << 9, 0);
+			nr_sects -= ret >> 9;
+			sector += ret >> 9;
+			if (ret < (sz << 9))
+				break;
+		}
+		ret = 0;
+		submit_bio(WRITE, bio);
+		cond_resched();
+	}
+
+	return ret;
+}
+
+/* convert discards into writes */
+static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
+{
+	struct block_device *bi_bdev = sbio->bi_bdev;
+	sector_t sector = sbio->bi_iter.bi_sector;
+	sector_t nr_sects = bio_sectors(sbio);
+
+	if (!bio_sectors(sbio))
+		return 0;
+	if (!(sbio->bi_rw & REQ_DISCARD))
+		return 0;
+
+	BUG_ON(sbio->bi_vcnt != 0);
+
+	DMDEBUG("DISCARD %lu: %u sectors", sbio->bi_iter.bi_sector,
+	    bio_sectors(sbio));
+
+	bio_endio(sbio);
+
+	issue_erase(bi_bdev, sector, nr_sects, GFP_NOFS, 1);
+	return 1;
+}
+
 static int linear_map(struct dm_target *ti, struct bio *bio)
 {
 	linear_map_bio(ti, bio);
-
+	if (secdel_map_discard(ti, bio))
+		return DM_MAPIO_SUBMITTED;
 	return DM_MAPIO_REMAPPED;
 }
 
@@ -141,8 +253,8 @@ static int linear_iterate_devices(struct dm_target *ti,
 }
 
 static struct target_type linear_target = {
-	.name   = "linear",
-	.version = {1, 2, 1},
+	.name   = "secdel",
+	.version = {1, 0, 0},
 	.module = THIS_MODULE,
 	.ctr    = linear_ctr,
 	.dtr    = linear_dtr,
@@ -166,3 +278,6 @@ void dm_linear_exit(void)
 {
 	dm_unregister_target(&linear_target);
 }
+
+module_init(dm_linear_init);
+module_exit(dm_linear_exit);
