@@ -21,4 +21,17 @@ clean:
 	-make -C $(KDIR) M=$(CURDIR) clean
 	-rm -f *.so *.o modules.order
 
+load: dm-linear.ko
+	sysctl kernel.printk=8
+	modprobe dm-mod
+	insmod ./dm-linear.ko
+	dmsetup create identity --table "0 `blockdev --getsz /dev/vda5` secdel /dev/vda5 0"
+	mount -o discard /dev/mapper/identity /mnt
+
+unload:
+	-umount /mnt
+	-dmsetup remove identity
+	-rmmod dm-linear.ko
+
+
 .PHONY: clean all install install-mod
