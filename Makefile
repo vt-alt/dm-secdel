@@ -33,5 +33,7 @@ unload:
 	-dmsetup remove identity
 	-rmmod dm-linear.ko
 
+test:
+	./tests.sh
 
 .PHONY: clean all install install-mod
