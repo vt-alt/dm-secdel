@@ -36,6 +36,10 @@ modprobe dm-mod
 insmod ./dm-linear.ko 2>/dev/null || :
 
 declare -x ldmesg
+dmesg() {
+	command dmesg "$@" | sed 's/^\[ \+/[/'
+}
+
 dmesg_start() {
 	ldmesg=$(dmesg | tail -1 | awk '{print$1}')
 	ldmesg=${ldmesg%]}
