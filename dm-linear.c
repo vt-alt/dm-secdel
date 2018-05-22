@@ -172,7 +172,8 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 				break;
 		}
 		ret = 0;
-		submit_bio(WRITE, bio);
+		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
+		submit_bio(bio);
 		cond_resched();
 	}
 
@@ -188,7 +189,7 @@ static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 
 	if (!bio_sectors(sbio))
 		return 0;
-	if (!(sbio->bi_rw & REQ_DISCARD))
+	if (bio_op(sbio) != REQ_OP_DISCARD)
 		return 0;
 
 	BUG_ON(sbio->bi_vcnt != 0);
@@ -252,6 +253,24 @@ static int linear_iterate_devices(struct dm_target *ti,
 	return fn(ti, lc->dev, lc->start, ti->len, data);
 }
 
+static long linear_direct_access(struct dm_target *ti, sector_t sector,
+				 void **kaddr, pfn_t *pfn, long size)
+{
+	struct linear_c *lc = ti->private;
+	struct block_device *bdev = lc->dev->bdev;
+	struct blk_dax_ctl dax = {
+		.sector = linear_map_sector(ti, sector),
+		.size = size,
+	};
+	long ret;
+
+	ret = bdev_direct_access(bdev, &dax);
+	*kaddr = dax.addr;
+	*pfn = dax.pfn;
+
+	return ret;
+}
+
 static struct target_type linear_target = {
 	.name   = "secdel",
 	.version = {1, 0, 0},
@@ -262,6 +281,7 @@ static struct target_type linear_target = {
 	.status = linear_status,
 	.prepare_ioctl = linear_prepare_ioctl,
 	.iterate_devices = linear_iterate_devices,
+	.direct_access = linear_direct_access,
 };
 
 int __init dm_linear_init(void)
