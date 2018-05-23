@@ -10,9 +10,11 @@
 #include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/bio.h>
+#include <linux/dax.h>
 #include <linux/slab.h>
 #include <linux/device-mapper.h>
 #include <linux/random.h>
+#include <linux/version.h>
 
 MODULE_AUTHOR("<vt@altlinux.org>");
 MODULE_LICENSE("GPL");
@@ -67,7 +69,13 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	ti->num_flush_bios = 1;
 	ti->num_discard_bios = 1;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0)
+	ti->num_secure_erase_bios = 1;
+#endif
 	ti->num_write_same_bios = 1;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
+	ti->num_write_zeroes_bios = 1;
+#endif
 	ti->private = lc;
 	return 0;
 
@@ -96,7 +104,11 @@ static void linear_map_bio(struct dm_target *ti, struct bio *bio)
 	struct linear_c *lc = ti->private;
 
 	bio->bi_bdev = lc->dev->bdev;
-	if (bio_sectors(bio))
+	if (bio_sectors(bio)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+	    || bio_op(bio) == REQ_OP_ZONE_RESET
+#endif
+	    )
 		bio->bi_iter.bi_sector =
 			linear_map_sector(ti, bio->bi_iter.bi_sector);
 }
@@ -115,6 +127,30 @@ static void bio_end_erase(struct bio *bio)
 		if (bvec->bv_page != ZERO_PAGE(0))
 			__free_page(bvec->bv_page);
 	bio_put(bio);
+}
+
+static void secdel_submit_bio(struct bio *bio)
+{
+#ifdef bio_set_op_attrs
+	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
+	submit_bio(bio);
+#else
+	submit_bio(WRITE, bio);
+#endif
+
+}
+
+static int op_discard(struct bio *bio)
+{
+	if (
+#ifdef bio_op
+	bio_op(bio) == REQ_OP_DISCARD
+#else
+	bio->bi_rw & REQ_DISCARD
+#endif
+	)
+		return true;
+	return false;
 }
 
 /*
@@ -172,8 +208,7 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 				break;
 		}
 		ret = 0;
-		bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
-		submit_bio(bio);
+		secdel_submit_bio(bio);
 		cond_resched();
 	}
 
@@ -189,7 +224,7 @@ static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 
 	if (!bio_sectors(sbio))
 		return 0;
-	if (bio_op(sbio) != REQ_OP_DISCARD)
+	if (!op_discard(sbio))
 		return 0;
 
 	BUG_ON(sbio->bi_vcnt != 0);
@@ -211,6 +246,19 @@ static int linear_map(struct dm_target *ti, struct bio *bio)
 	return DM_MAPIO_REMAPPED;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+static int linear_end_io(struct dm_target *ti, struct bio *bio,
+			 blk_status_t *error)
+{
+	struct linear_c *lc = ti->private;
+
+	if (!*error && bio_op(bio) == REQ_OP_ZONE_REPORT)
+		dm_remap_zone_report(ti, bio, lc->start);
+
+	return DM_ENDIO_DONE;
+}
+#endif
+
 static void linear_status(struct dm_target *ti, status_type_t type,
 			  unsigned status_flags, char *result, unsigned maxlen)
 {
@@ -228,8 +276,12 @@ static void linear_status(struct dm_target *ti, status_type_t type,
 	}
 }
 
-static int linear_prepare_ioctl(struct dm_target *ti,
-		struct block_device **bdev, fmode_t *mode)
+static int linear_prepare_ioctl(struct dm_target *ti, struct block_device **bdev
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
+
+		, fmode_t *mode
+#endif
+		)
 {
 	struct linear_c *lc = (struct linear_c *) ti->private;
 	struct dm_dev *dev = lc->dev;
@@ -253,6 +305,24 @@ static int linear_iterate_devices(struct dm_target *ti,
 	return fn(ti, lc->dev, lc->start, ti->len, data);
 }
 
+#if IS_ENABLED(CONFIG_DAX_DRIVER)
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
+static long linear_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
+				    long nr_pages, void **kaddr, pfn_t *pfn)
+{
+	long ret;
+	struct linear_c *lc = ti->private;
+	struct block_device *bdev = lc->dev->bdev;
+	struct dax_device *dax_dev = lc->dev->dax_dev;
+	sector_t dev_sector, sector = pgoff * PAGE_SECTORS;
+
+	dev_sector = linear_map_sector(ti, sector);
+	ret = bdev_dax_pgoff(bdev, dev_sector, nr_pages * PAGE_SIZE, &pgoff);
+	if (ret)
+		return ret;
+	return dax_direct_access(dax_dev, pgoff, nr_pages, kaddr, pfn);
+}
+# elif LINUX_VERSION_CODE > KERNEL_VERSION(4,5,0)
 static long linear_direct_access(struct dm_target *ti, sector_t sector,
 				 void **kaddr, pfn_t *pfn, long size)
 {
@@ -270,18 +340,53 @@ static long linear_direct_access(struct dm_target *ti, sector_t sector,
 
 	return ret;
 }
+# endif
+
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+static size_t linear_dax_copy_from_iter(struct dm_target *ti, pgoff_t pgoff,
+					void *addr, size_t bytes, struct iov_iter *i)
+{
+	struct linear_c *lc = ti->private;
+	struct block_device *bdev = lc->dev->bdev;
+	struct dax_device *dax_dev = lc->dev->dax_dev;
+	sector_t dev_sector, sector = pgoff * PAGE_SECTORS;
+
+	dev_sector = linear_map_sector(ti, sector);
+	if (bdev_dax_pgoff(bdev, dev_sector, ALIGN(bytes, PAGE_SIZE), &pgoff))
+		return 0;
+	return dax_copy_from_iter(dax_dev, pgoff, addr, bytes, i);
+}
+# endif
+#else
+# define linear_dax_direct_access NULL
+# define linear_direct_access NULL
+# define linear_dax_copy_from_iter NULL
+#endif
 
 static struct target_type linear_target = {
 	.name   = "secdel",
 	.version = {1, 0, 0},
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+	.features = DM_TARGET_PASSES_INTEGRITY | DM_TARGET_ZONED_HM,
+#endif
 	.module = THIS_MODULE,
 	.ctr    = linear_ctr,
 	.dtr    = linear_dtr,
 	.map    = linear_map,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+	.end_io = linear_end_io,
+#endif
 	.status = linear_status,
 	.prepare_ioctl = linear_prepare_ioctl,
 	.iterate_devices = linear_iterate_devices,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
+	.direct_access = linear_dax_direct_access,
+#elif LINUX_VERSION_CODE > KERNEL_VERSION(4,5,0)
 	.direct_access = linear_direct_access,
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+	.dax_copy_from_iter = linear_dax_copy_from_iter,
+#endif
 };
 
 int __init dm_linear_init(void)
