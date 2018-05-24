@@ -1,0 +1,111 @@
+#!/bin/sh
+#
+# Setup script for dm-secdel
+#
+# (C) 2018 <vt@altlinux.org>
+# License: GPLv2
+#
+
+set -efu
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+
+error() {
+	echo "Error: $*"
+	exit 1
+}
+
+usage() {
+	echo "Usage:"
+	echo "  secdelsetup <source-device> [mapper-name]"
+	echo "Options:"
+	echo "  -d|--detach <device>   detach device"
+	echo "  -D|--detach-all        detach all devices"
+	echo "  -l|--list              list active device maps"
+	echo "  -a|--all               list in different format"
+	echo "  -L|--lsblk             output in lsblk format"
+	echo "  -h|--help              this text"
+	exit
+}
+
+prog=${0##*/}
+temp=$(getopt -n $prog -o L,d:,D,l,a,h -l lsblk,detach,detach-all,list,all,help -- "$@") || usage
+eval set -- "$temp"
+
+check() {
+	! dmsetup table --target secdel | grep -q '^No devices found'
+}
+
+list() {
+	check && dmsetup table --target secdel | awk -F: '{print "/dev/mapper/"$1}'
+}
+
+list_lsblk() {
+	check && lsblk -s $(list)
+}
+
+list_all() {
+	check && dmsetup table --target secdel | while read devx x x x devn x; do
+		dev=/dev/mapper/${devx%:}
+		while read ma mi z dv; do
+			dn=$ma:$mi
+			if [ "$devn" = "$dn" ]; then
+				echo "$dev <- /dev/$dv"
+				dev=
+				break
+			fi
+		done < /proc/partitions
+		[ -n "$dev" ] && echo "$dev <- $devn"
+	done
+}
+detach() {
+	echo "detach $1"
+	dmsetup remove "$1"
+}
+
+detach_all() {
+	list | while read dev x; do
+		detach $dev
+	done
+}
+
+get_name() {
+	local n fn
+
+	for i in $(seq 0 6); do
+		n=secdel$i
+		fn=/dev/mapper/$n
+		if [ ! -e $fn ]; then
+			echo $n 
+			return
+		fi
+	done
+	return 1
+}
+
+while :; do
+	case "${1:-}" in
+		-d|--detach) detach $2; exit ;;
+		-D|--detach-all) detach_all; exit ;;
+		-h|--help) usage ;;
+		-l|--list) list; exit ;;
+		-a|--all) list_all; exit ;;
+		-L|--lsblk) list_lsblk; exit ;;
+		--) shift; break ;;
+	esac
+	shift
+done
+
+modprobe -q dm-mod	|| :
+modprobe -q dm-secdel	|| :
+
+srcdev=${1:-}
+mapname=${2:-}
+
+[ -z "$srcdev" ]  && error "Specify source device"
+if [ -z "$mapname" ]; then
+	mapname=$(get_name) || error "Can not generate secdel device name"
+fi
+
+sz=$(blockdev --getsz $srcdev)
+dmsetup create $mapname --table "0 $sz secdel $srcdev 0"
+echo /dev/mapper/$mapname
