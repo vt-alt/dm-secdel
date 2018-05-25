@@ -8,6 +8,7 @@
 
 set -efu
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
+secdeltab=${SECDELTAB:-/etc/secdeltab}
 
 error() {
 	echo "Error: $*"
@@ -22,13 +23,16 @@ usage() {
 	echo "  -D|--detach-all        detach all devices"
 	echo "  -l|--list              list active device maps"
 	echo "  -a|--all               list in different format"
-	echo "  -L|--lsblk             output in lsblk format"
+	echo "  --uuid                 --all with UUID instead of dev name"
+	echo "  --lsblk                output in lsblk format"
+	echo "  --start                start devices from secdeltab"
+	echo "  --save                 save active divices to secdeltab"
 	echo "  -h|--help              this text"
 	exit
 }
 
 prog=${0##*/}
-temp=$(getopt -n $prog -o L,d:,D,l,a,h -l lsblk,detach,detach-all,list,all,help -- "$@") || usage
+temp=$(getopt -n $prog -o d:,D,l,a,h -l lsblk,detach,detach-all,list,all,help,start,save,uuid -- "$@") || usage
 eval set -- "$temp"
 
 check() {
@@ -46,15 +50,18 @@ list_lsblk() {
 list_all() {
 	check && dmsetup table --target secdel | while read devx x x x devn x; do
 		dev=/dev/mapper/${devx%:}
+		devidx=$(stat -L -c '%t:%T' $dev)
 		while read ma mi z dv; do
 			dn=$ma:$mi
 			if [ "$devn" = "$dn" ]; then
-				echo "$dev <- /dev/$dv"
+				uuid=
+				[ "${UUID:-}" ] && uuid=$(find_uuid_by_hex_minmaj $devidx)
+				echo "$dev ${uuid:-/dev/$dv}"
 				dev=
 				break
 			fi
 		done < /proc/partitions
-		[ -n "$dev" ] && echo "$dev <- $devn"
+		[ -n "$dev" ] && echo "$dev $devn"
 	done
 }
 detach() {
@@ -82,30 +89,83 @@ get_name() {
 	return 1
 }
 
+find_uuid_by_hex_minmaj() {
+	local devidx=$1
+
+	find -L /dev/disk/by-uuid -xtype l -print0 |\
+		xargs -0r stat -L -c '%t:%T %n' |\
+		grep "^$devidx " |\
+	while read mm dname; do
+		basedname=${dname##*/}
+		echo UUID=$basedname
+		return
+	done
+}
+
+find_dev() {
+	local dev=$1
+	local devbase=${dev##*/}
+	local devid=${dev##*=}
+
+	if [ $dev != $devid ]; then
+		find /dev/disk -name $devid | head -1
+		return
+	fi
+	if [ $dev != $devbase ]; then
+		echo /dev/$devbase
+		return
+	fi
+	echo $dev
+}
+
+attach() {
+	local srcdev=${1:-}
+	local mapname=${2:-}
+	local opts=${3:-}
+
+	[ -z "$srcdev" ]  && error "Specify source device"
+	if [ -z "$mapname" ]; then
+		mapname=$(get_name) || error "Can not generate secdel device name"
+	fi
+	modprobe -q dm-mod	|| :
+	modprobe -q dm-secdel	|| :
+
+	mapbase=${mapname##*/}
+	srcdev=$(find_dev $srcdev)
+	sz=$(blockdev --getsz $srcdev)
+	dmsetup create $mapbase --table "0 $sz secdel $srcdev 0" && \
+	echo "/dev/mapper/$mapbase is attached to $srcdev"
+}
+
+secdeltab_save() {
+	UUID=true
+	{
+		echo "# <target name> <source device> <options>"
+		list_all
+	} > $secdeltab
+}
+
+secdeltab_start() {
+	while read tgt src opts; do
+		[ $(expr $tgt : ^# ) = 1 ] && continue
+		attach $src $tgt $opts || :
+	done < $secdeltab
+}
+
 while :; do
 	case "${1:-}" in
 		-d|--detach) detach $2; exit ;;
 		-D|--detach-all) detach_all; exit ;;
 		-h|--help) usage ;;
 		-l|--list) list; exit ;;
+		--uuid) UUID=true ;;
 		-a|--all) list_all; exit ;;
 		-L|--lsblk) list_lsblk; exit ;;
+		--start) secdeltab_start; exit ;;
+		--save) secdeltab_save; exit ;;
 		--) shift; break ;;
 	esac
 	shift
 done
 
-modprobe -q dm-mod	|| :
-modprobe -q dm-secdel	|| :
-
-srcdev=${1:-}
-mapname=${2:-}
-
-[ -z "$srcdev" ]  && error "Specify source device"
-if [ -z "$mapname" ]; then
-	mapname=$(get_name) || error "Can not generate secdel device name"
-fi
-
-sz=$(blockdev --getsz $srcdev)
-dmsetup create $mapname --table "0 $sz secdel $srcdev 0"
-echo /dev/mapper/$mapname
+attach "$@"
