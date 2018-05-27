@@ -1,5 +1,5 @@
 Name: dm-secdel
-Version: 1.0.0
+Version: 1.0.1
 Release: alt1
 
 Summary: dm-linear with secure deletion on discard
@@ -34,5 +34,8 @@ install -pDm0644 %_sourcedir/%name-%version.tar %kernel_srcdir/kernel-source-%na
 %attr(0644,root,root) %kernel_src/kernel-source-%name-%version.tar
 
 %changelog
+* Sun May 27 2018 Vitaly Chikunov <vt@altlinux.org> 1.0.1-alt1
+- Systemd support.
+
 * Thu May 24 2018 Vitaly Chikunov <vt@altlinux.org> 1.0.0-alt1
 - Package for ALT.
