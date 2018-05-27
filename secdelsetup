@@ -19,20 +19,20 @@ usage() {
 	echo "Usage:"
 	echo "  secdelsetup <source-device> [mapper-name]"
 	echo "Options:"
-	echo "  -d|--detach <device>   detach device"
-	echo "  -D|--detach-all        detach all devices"
-	echo "  -l|--list              list active device maps"
-	echo "  -a|--all               list in different format"
-	echo "  --uuid                 --all with UUID instead of dev name"
-	echo "  --lsblk                output in lsblk format"
-	echo "  --start                start devices from secdeltab"
-	echo "  --save                 save active divices to secdeltab"
-	echo "  -h|--help              this text"
+	echo "  -d|--detach <device>    detach device"
+	echo "  -D|--detach-all|--stop  detach all devices"
+	echo "  -l|--list               list active device maps"
+	echo "  -a|--all                list in different format"
+	echo "  --uuid                  --all with UUID instead of dev name"
+	echo "  --lsblk                 output in lsblk format"
+	echo "  --start                 start devices from secdeltab"
+	echo "  --save                  save active divices to secdeltab"
+	echo "  -h|--help               this text"
 	exit
 }
 
 prog=${0##*/}
-temp=$(getopt -n $prog -o d:,D,l,a,h -l lsblk,detach,detach-all,list,all,help,start,save,uuid -- "$@") || usage
+temp=$(getopt -n $prog -o d:,D,l,a,h -l uuid,lsblk,detach,detach-all,list,all,help,start,stop,save -- "$@") || usage
 eval set -- "$temp"
 
 check() {
@@ -48,8 +48,11 @@ list_lsblk() {
 }
 
 list_all() {
+	local m=${1:-}
+
 	check && dmsetup table --target secdel | while read devx x x x devn x; do
 		dev=/dev/mapper/${devx%:}
+		[ "$m" ] && [ "$m" != $dev ] && continue
 		devidx=$(stat -L -c '%t:%T' $dev)
 		while read ma mi z dv; do
 			dn=$ma:$mi
@@ -64,6 +67,7 @@ list_all() {
 		[ -n "$dev" ] && echo "$dev $devn"
 	done
 }
+
 detach() {
 	echo "detach $1"
 	dmsetup remove "$1"
@@ -131,10 +135,15 @@ attach() {
 	modprobe -q dm-secdel	|| :
 
 	mapbase=${mapname##*/}
+	mapname=/dev/mapper/$mapbase
+	if [ -e $mapname ]; then
+		echo "$mapname is already attached"
+		return
+	fi
 	srcdev=$(find_dev $srcdev)
 	sz=$(blockdev --getsz $srcdev)
 	dmsetup create $mapbase --table "0 $sz secdel $srcdev 0" && \
-	echo "/dev/mapper/$mapbase is attached to $srcdev"
+	echo "$mapname is attached to $srcdev"
 }
 
 secdeltab_save() {
@@ -152,6 +161,14 @@ secdeltab_start() {
 	done < $secdeltab
 }
 
+secdeltab_stop() {
+	while read tgt src opts; do
+		[ $(expr $tgt : ^# ) = 1 ] && continue
+		detach $src || :
+	done < $secdeltab
+}
+
+cmd=
 while :; do
 	case "${1:-}" in
 		-d|--detach) detach $2; exit ;;
@@ -159,13 +176,18 @@ while :; do
 		-h|--help) usage ;;
 		-l|--list) list; exit ;;
 		--uuid) UUID=true ;;
-		-a|--all) list_all; exit ;;
+		-a|--all) cmd=list_all ;;
 		-L|--lsblk) list_lsblk; exit ;;
 		--start) secdeltab_start; exit ;;
-		--save) secdeltab_save; exit ;;
+		--save)  secdeltab_save; exit ;;
+		--stop)  secdeltab_stop; exit ;;
 		--) shift; break ;;
 	esac
 	shift
 done
 
+if [ $cmd ]; then
+	eval $cmd "$@"
+	exit
+fi
 attach "$@"
