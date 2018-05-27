@@ -1,0 +1,17 @@
+#  Maintains /etc/secdeltab device maps on system boot and shutdown
+
+[Unit]
+Description=secdeltab Service
+Wants=local-fs-pre.target
+Before=local-fs.target shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/etc/secdeltab
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/secdelsetup --start
+ExecStop=/sbin/secdelsetup --stop
+
+[Install]
+WantedBy=local-fs.target

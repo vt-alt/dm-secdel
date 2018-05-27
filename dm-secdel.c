@@ -25,7 +25,7 @@ MODULE_DESCRIPTION("dm-linear with secure deletion on discard");
 /*
  * Linear: maps a linear range of a device.
  */
-struct linear_c {
+struct secdel_c {
 	struct dm_dev *dev;
 	sector_t start;
 };
@@ -33,9 +33,9 @@ struct linear_c {
 /*
  * Construct a linear mapping: <dev_path> <offset>
  */
-static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
+static int secdel_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
-	struct linear_c *lc;
+	struct secdel_c *lc;
 	unsigned long long tmp;
 	char dummy;
 	int ret;
@@ -47,7 +47,7 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
 	if (lc == NULL) {
-		ti->error = "Cannot allocate linear context";
+		ti->error = "Cannot allocate secdel context";
 		return -ENOMEM;
 	}
 
@@ -84,24 +84,24 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	return ret;
 }
 
-static void linear_dtr(struct dm_target *ti)
+static void secdel_dtr(struct dm_target *ti)
 {
-	struct linear_c *lc = (struct linear_c *) ti->private;
+	struct secdel_c *lc = (struct secdel_c *) ti->private;
 
 	dm_put_device(ti, lc->dev);
 	kfree(lc);
 }
 
-static sector_t linear_map_sector(struct dm_target *ti, sector_t bi_sector)
+static sector_t secdel_map_sector(struct dm_target *ti, sector_t bi_sector)
 {
-	struct linear_c *lc = ti->private;
+	struct secdel_c *lc = ti->private;
 
 	return lc->start + dm_target_offset(ti, bi_sector);
 }
 
-static void linear_map_bio(struct dm_target *ti, struct bio *bio)
+static void secdel_map_bio(struct dm_target *ti, struct bio *bio)
 {
-	struct linear_c *lc = ti->private;
+	struct secdel_c *lc = ti->private;
 
 	bio->bi_bdev = lc->dev->bdev;
 	if (bio_sectors(bio)
@@ -110,7 +110,7 @@ static void linear_map_bio(struct dm_target *ti, struct bio *bio)
 #endif
 	    )
 		bio->bi_iter.bi_sector =
-			linear_map_sector(ti, bio->bi_iter.bi_sector);
+			secdel_map_sector(ti, bio->bi_iter.bi_sector);
 }
 
 static void bio_end_erase(struct bio *bio)
@@ -238,19 +238,19 @@ static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 	return 1;
 }
 
-static int linear_map(struct dm_target *ti, struct bio *bio)
+static int secdel_map(struct dm_target *ti, struct bio *bio)
 {
-	linear_map_bio(ti, bio);
+	secdel_map_bio(ti, bio);
 	if (secdel_map_discard(ti, bio))
 		return DM_MAPIO_SUBMITTED;
 	return DM_MAPIO_REMAPPED;
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
-static int linear_end_io(struct dm_target *ti, struct bio *bio,
+static int secdel_end_io(struct dm_target *ti, struct bio *bio,
 			 blk_status_t *error)
 {
-	struct linear_c *lc = ti->private;
+	struct secdel_c *lc = ti->private;
 
 	if (!*error && bio_op(bio) == REQ_OP_ZONE_REPORT)
 		dm_remap_zone_report(ti, bio, lc->start);
@@ -259,10 +259,10 @@ static int linear_end_io(struct dm_target *ti, struct bio *bio,
 }
 #endif
 
-static void linear_status(struct dm_target *ti, status_type_t type,
+static void secdel_status(struct dm_target *ti, status_type_t type,
 			  unsigned status_flags, char *result, unsigned maxlen)
 {
-	struct linear_c *lc = (struct linear_c *) ti->private;
+	struct secdel_c *lc = (struct secdel_c *) ti->private;
 
 	switch (type) {
 	case STATUSTYPE_INFO:
@@ -276,14 +276,14 @@ static void linear_status(struct dm_target *ti, status_type_t type,
 	}
 }
 
-static int linear_prepare_ioctl(struct dm_target *ti, struct block_device **bdev
+static int secdel_prepare_ioctl(struct dm_target *ti, struct block_device **bdev
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
 
 		, fmode_t *mode
 #endif
 		)
 {
-	struct linear_c *lc = (struct linear_c *) ti->private;
+	struct secdel_c *lc = (struct secdel_c *) ti->private;
 	struct dm_dev *dev = lc->dev;
 
 	*bdev = dev->bdev;
@@ -297,39 +297,39 @@ static int linear_prepare_ioctl(struct dm_target *ti, struct block_device **bdev
 	return 0;
 }
 
-static int linear_iterate_devices(struct dm_target *ti,
+static int secdel_iterate_devices(struct dm_target *ti,
 				  iterate_devices_callout_fn fn, void *data)
 {
-	struct linear_c *lc = ti->private;
+	struct secdel_c *lc = ti->private;
 
 	return fn(ti, lc->dev, lc->start, ti->len, data);
 }
 
 #if IS_ENABLED(CONFIG_DAX_DRIVER)
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
-static long linear_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
+static long secdel_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
 				    long nr_pages, void **kaddr, pfn_t *pfn)
 {
 	long ret;
-	struct linear_c *lc = ti->private;
+	struct secdel_c *lc = ti->private;
 	struct block_device *bdev = lc->dev->bdev;
 	struct dax_device *dax_dev = lc->dev->dax_dev;
 	sector_t dev_sector, sector = pgoff * PAGE_SECTORS;
 
-	dev_sector = linear_map_sector(ti, sector);
+	dev_sector = secdel_map_sector(ti, sector);
 	ret = bdev_dax_pgoff(bdev, dev_sector, nr_pages * PAGE_SIZE, &pgoff);
 	if (ret)
 		return ret;
 	return dax_direct_access(dax_dev, pgoff, nr_pages, kaddr, pfn);
 }
 # elif LINUX_VERSION_CODE > KERNEL_VERSION(4,5,0)
-static long linear_direct_access(struct dm_target *ti, sector_t sector,
+static long secdel_direct_access(struct dm_target *ti, sector_t sector,
 				 void **kaddr, pfn_t *pfn, long size)
 {
-	struct linear_c *lc = ti->private;
+	struct secdel_c *lc = ti->private;
 	struct block_device *bdev = lc->dev->bdev;
 	struct blk_dax_ctl dax = {
-		.sector = linear_map_sector(ti, sector),
+		.sector = secdel_map_sector(ti, sector),
 		.size = size,
 	};
 	long ret;
@@ -343,55 +343,55 @@ static long linear_direct_access(struct dm_target *ti, sector_t sector,
 # endif
 
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
-static size_t linear_dax_copy_from_iter(struct dm_target *ti, pgoff_t pgoff,
+static size_t secdel_dax_copy_from_iter(struct dm_target *ti, pgoff_t pgoff,
 					void *addr, size_t bytes, struct iov_iter *i)
 {
-	struct linear_c *lc = ti->private;
+	struct secdel_c *lc = ti->private;
 	struct block_device *bdev = lc->dev->bdev;
 	struct dax_device *dax_dev = lc->dev->dax_dev;
 	sector_t dev_sector, sector = pgoff * PAGE_SECTORS;
 
-	dev_sector = linear_map_sector(ti, sector);
+	dev_sector = secdel_map_sector(ti, sector);
 	if (bdev_dax_pgoff(bdev, dev_sector, ALIGN(bytes, PAGE_SIZE), &pgoff))
 		return 0;
 	return dax_copy_from_iter(dax_dev, pgoff, addr, bytes, i);
 }
 # endif
 #else
-# define linear_dax_direct_access NULL
-# define linear_direct_access NULL
-# define linear_dax_copy_from_iter NULL
+# define secdel_dax_direct_access NULL
+# define secdel_direct_access NULL
+# define secdel_dax_copy_from_iter NULL
 #endif
 
-static struct target_type linear_target = {
+static struct target_type secdel_target = {
 	.name   = "secdel",
 	.version = {1, 0, 0},
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
 	.features = DM_TARGET_PASSES_INTEGRITY | DM_TARGET_ZONED_HM,
 #endif
 	.module = THIS_MODULE,
-	.ctr    = linear_ctr,
-	.dtr    = linear_dtr,
-	.map    = linear_map,
+	.ctr    = secdel_ctr,
+	.dtr    = secdel_dtr,
+	.map    = secdel_map,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
-	.end_io = linear_end_io,
+	.end_io = secdel_end_io,
 #endif
-	.status = linear_status,
-	.prepare_ioctl = linear_prepare_ioctl,
-	.iterate_devices = linear_iterate_devices,
+	.status = secdel_status,
+	.prepare_ioctl = secdel_prepare_ioctl,
+	.iterate_devices = secdel_iterate_devices,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
-	.direct_access = linear_dax_direct_access,
+	.direct_access = secdel_dax_direct_access,
 #elif LINUX_VERSION_CODE > KERNEL_VERSION(4,5,0)
-	.direct_access = linear_direct_access,
+	.direct_access = secdel_direct_access,
 #endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
-	.dax_copy_from_iter = linear_dax_copy_from_iter,
+	.dax_copy_from_iter = secdel_dax_copy_from_iter,
 #endif
 };
 
-int __init dm_linear_init(void)
+int __init dm_secdel_init(void)
 {
-	int r = dm_register_target(&linear_target);
+	int r = dm_register_target(&secdel_target);
 
 	if (r < 0)
 		DMERR("register failed %d", r);
@@ -399,10 +399,10 @@ int __init dm_linear_init(void)
 	return r;
 }
 
-void dm_linear_exit(void)
+void dm_secdel_exit(void)
 {
-	dm_unregister_target(&linear_target);
+	dm_unregister_target(&secdel_target);
 }
 
-module_init(dm_linear_init);
-module_exit(dm_linear_exit);
+module_init(dm_secdel_init);
+module_exit(dm_secdel_exit);

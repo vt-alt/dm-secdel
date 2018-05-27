@@ -4,36 +4,49 @@ KVER	?= $(shell uname -r)
 KDIR	?= /lib/modules/$(KVER)/build/
 DEPMOD	= /sbin/depmod -a
 VERSION	= $(shell git -C $M describe --tag --dirty --always)
-obj-m	= dm-linear.o
-CFLAGS_dm-linear.o = -DDEBUG -DCONFIG_DM_DEBUG
+obj-m	= dm-secdel.o
+CFLAGS_dm-secdel.o = -DDEBUG -DCONFIG_DM_DEBUG
 
-all: dm-linear.ko
+all: dm-secdel.ko
 
-dm-linear.ko: dm-linear.c
+dm-secdel.ko: dm-secdel.c
 	make -C $(KDIR) M=$(CURDIR) modules CONFIG_DEBUG_INFO=y
 
-install: install-mod
+install: install-mod install-bin
 
-install-mod: dm-linear.ko
+install-mod: dm-secdel.ko
 	make -C $(KDIR) M=$(CURDIR) modules_install INSTALL_MOD_PATH=$(DESTDIR)
+
+install-bin: secdelsetup
+	install -pD secdelsetup $(DESTDIR)/sbin/secdelsetup
+	install -pD -m644 secdeltab.service $(DESTDIR)/lib/systemd/system/secdeltab.service
+	/sbin/systemctl daemon-reload
+	/sbin/systemctl enable secdeltab
+
+uninstall:
+	-rm -f $(DESTDIR)/sbin/secdelsetup
+	-rm -f $(DESTDIR)/lib/modules/$(KVER)/extra/dm-secdel.ko
+	-/sbin/systemctl --no-reload disable --now secdeltab.service
+	-rm -f $(DESTDIR)/lib/systemd/system/secdeltab.service
+	-/sbin/systemctl daemon-reload
 
 clean:
 	-make -C $(KDIR) M=$(CURDIR) clean
 	-rm -f *.so *.o modules.order
 
-load: dm-linear.ko
+load: dm-*.ko
 	sysctl kernel.printk=8
 	modprobe dm-mod
-	insmod ./dm-linear.ko
+	insmod ./dm-secdel.ko
 	dmsetup create identity --table "0 `blockdev --getsz /dev/vda5` secdel /dev/vda5 0"
 	mount -o discard /dev/mapper/identity /mnt
 
 unload:
 	-umount /mnt
 	-dmsetup remove identity
-	-rmmod dm-linear.ko
+	-rmmod dm-secdel.ko
 
 test:
 	./tests.sh
 
-.PHONY: clean all install install-mod
+.PHONY: clean all install install-mod install-bin uninstall load unload test
