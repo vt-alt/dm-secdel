@@ -20,15 +20,15 @@ install-mod: dm-secdel.ko
 install-bin: secdelsetup
 	install -pD secdelsetup $(DESTDIR)/sbin/secdelsetup
 	install -pD -m644 secdeltab.service $(DESTDIR)/lib/systemd/system/secdeltab.service
-	/sbin/systemctl daemon-reload
-	/sbin/systemctl enable secdeltab
+	-systemctl daemon-reload
+	-systemctl enable secdeltab
 
 uninstall:
 	-rm -f $(DESTDIR)/sbin/secdelsetup
 	-rm -f $(DESTDIR)/lib/modules/$(KVER)/extra/dm-secdel.ko
-	-/sbin/systemctl --no-reload disable --now secdeltab.service
+	-systemctl --no-reload disable --now secdeltab.service
 	-rm -f $(DESTDIR)/lib/systemd/system/secdeltab.service
-	-/sbin/systemctl daemon-reload
+	-systemctl daemon-reload
 
 clean:
 	-make -C $(KDIR) M=$(CURDIR) clean
