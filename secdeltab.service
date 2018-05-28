@@ -2,8 +2,10 @@
 
 [Unit]
 Description=secdeltab Service
+DefaultDependencies=no
+After=systemd-fsck-root.service
 Wants=local-fs-pre.target
-Before=local-fs.target shutdown.target
+Before=local-fs-pre.target shutdown.target
 Conflicts=shutdown.target
 ConditionPathExists=/etc/secdeltab
 
