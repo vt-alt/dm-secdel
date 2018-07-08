@@ -25,6 +25,7 @@ declare -xi iter+=1
 atexit() {
 	mountpoint -q $mnt && umount $mnt
 	dmsetup remove secdel >/dev/null 2>&1
+	rmmod dm_secdel >/dev/null
 	test "${lodev:-}" && losetup -d $lodev
 	test -e loop.img && rm -f loop.img
 	test -e marker-file.blk && rm -f marker-file.blk
@@ -33,7 +34,14 @@ trap atexit exit
 
 sysctl kernel.printk=8
 modprobe dm-mod
-insmod ./dm-linear.ko 2>/dev/null || :
+insmod ./dm-secdel 2>/dev/null || :
+
+srcversion=$(modinfo ./dm-secdel.ko | awk '$1 ~ /srcversion/ {print $2}')
+modsrcver=$(cat /sys/module/dm_secdel/srcversion)
+if [ "$srcversion" != "$modsrcver" ]; then
+       echo "ERROR: loaded module version is different from what we want to test"
+       exit 1
+fi
 
 declare -x ldmesg
 dmesg() {
