@@ -86,7 +86,7 @@ static int secdel_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 static void secdel_dtr(struct dm_target *ti)
 {
-	struct secdel_c *lc = (struct secdel_c *) ti->private;
+	struct secdel_c *lc = ti->private;
 
 	dm_put_device(ti, lc->dev);
 	kfree(lc);
@@ -99,11 +99,15 @@ static sector_t secdel_map_sector(struct dm_target *ti, sector_t bi_sector)
 	return lc->start + dm_target_offset(ti, bi_sector);
 }
 
+#ifndef bio_set_dev
+#define bio_set_dev(bio, x) (bio)->bi_bdev = (x)
+#endif
+
 static void secdel_map_bio(struct dm_target *ti, struct bio *bio)
 {
 	struct secdel_c *lc = ti->private;
 
-	bio->bi_bdev = lc->dev->bdev;
+	bio_set_dev(bio, lc->dev->bdev);
 	if (bio_sectors(bio)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
 	    || bio_op(bio) == REQ_OP_ZONE_RESET
@@ -113,16 +117,19 @@ static void secdel_map_bio(struct dm_target *ti, struct bio *bio)
 			secdel_map_sector(ti, bio->bi_iter.bi_sector);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0)
+#define bi_status bi_error
+#endif
 static void bio_end_erase(struct bio *bio)
 {
 	struct bio_vec *bvec;
 	int i;
 
-	if (bio->bi_error)
+	if (bio->bi_status)
 		DMERR("bio_end_erase %lu[%u] error=%d",
 		    bio->bi_iter.bi_sector,
 		    bio->bi_iter.bi_size >> 9,
-		    bio->bi_error);
+		    bio->bi_status);
 	bio_for_each_segment_all(bvec, bio, i)
 		if (bvec->bv_page != ZERO_PAGE(0))
 			__free_page(bvec->bv_page);
@@ -131,7 +138,7 @@ static void bio_end_erase(struct bio *bio)
 
 static void secdel_submit_bio(struct bio *bio)
 {
-#ifdef bio_set_op_attrs
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0)
 	bio_set_op_attrs(bio, REQ_OP_WRITE, 0);
 	submit_bio(bio);
 #else
@@ -178,7 +185,7 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 		}
 
 		bio->bi_iter.bi_sector = sector;
-		bio->bi_bdev   = bdev;
+		bio_set_dev(bio, bdev);
 		bio->bi_end_io = bio_end_erase;
 
 		while (nr_sects != 0) {
@@ -218,7 +225,8 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 /* convert discards into writes */
 static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 {
-	struct block_device *bi_bdev = sbio->bi_bdev;
+	struct secdel_c *lc = ti->private;
+	struct block_device *bdev = lc->dev->bdev;
 	sector_t sector = sbio->bi_iter.bi_sector;
 	sector_t nr_sects = bio_sectors(sbio);
 
@@ -234,7 +242,7 @@ static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 
 	bio_endio(sbio);
 
-	issue_erase(bi_bdev, sector, nr_sects, GFP_NOFS, 1);
+	issue_erase(bdev, sector, nr_sects, GFP_NOFS, 1);
 	return 1;
 }
 
@@ -262,7 +270,7 @@ static int secdel_end_io(struct dm_target *ti, struct bio *bio,
 static void secdel_status(struct dm_target *ti, status_type_t type,
 			  unsigned status_flags, char *result, unsigned maxlen)
 {
-	struct secdel_c *lc = (struct secdel_c *) ti->private;
+	struct secdel_c *lc = ti->private;
 
 	switch (type) {
 	case STATUSTYPE_INFO:
@@ -283,7 +291,7 @@ static int secdel_prepare_ioctl(struct dm_target *ti, struct block_device **bdev
 #endif
 		)
 {
-	struct secdel_c *lc = (struct secdel_c *) ti->private;
+	struct secdel_c *lc = ti->private;
 	struct dm_dev *dev = lc->dev;
 
 	*bdev = dev->bdev;
