@@ -19,7 +19,7 @@
 MODULE_AUTHOR("<vt@altlinux.org>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("dm-linear with secure deletion on discard");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.3");
 
 #define DM_MSG_PREFIX "secdel"
 
@@ -374,7 +374,7 @@ static size_t secdel_dax_copy_from_iter(struct dm_target *ti, pgoff_t pgoff,
 
 static struct target_type secdel_target = {
 	.name   = "secdel",
-	.version = {1, 0, 0},
+	.version = {1, 0, 3},
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
 	.features = DM_TARGET_PASSES_INTEGRITY | DM_TARGET_ZONED_HM,
 #endif
