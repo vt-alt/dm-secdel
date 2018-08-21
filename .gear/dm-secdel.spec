@@ -1,6 +1,6 @@
 Name: dm-secdel
 Version: 1.0.3
-Release: alt1
+Release: alt0.M80C.1
 
 Summary: dm-linear with secure deletion on discard
 License: GPLv2
@@ -52,6 +52,9 @@ systemctl -q enable secdeltab
 %preun_service secdeltab
 
 %changelog
+* Tue Aug 21 2018 Anton V. Boyarshinov <boyarsh@altlinux.org> 1.0.3-alt0.M80C.1
+- backport to c8.1
+
 * Mon Jul 09 2018 Vitaly Chikunov <vt@altlinux.org> 1.0.3-alt1
 - Compatibility with kernel 4.14
 
