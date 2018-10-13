@@ -318,6 +318,8 @@ static int secdel_iterate_devices(struct dm_target *ti,
 
 static void secdel_io_hints(struct dm_target *ti, struct queue_limits *limits)
 {
+	struct secdel_c *lc = ti->private;
+
 	limits->discard_granularity = bdev_logical_block_size(lc->dev->bdev);
 	limits->max_discard_sectors = PAGE_SIZE >> 9;
 }
