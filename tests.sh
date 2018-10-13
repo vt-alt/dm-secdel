@@ -193,7 +193,7 @@ testfs() {
 	test_rm
 	#test_fstrim
 
-	dmesg_show | grep -v 'device-mapper: secdel DEBUG'
+	dmesg_show | grep -v 'device-mapper: secdel DEBUG' || :
 	if ! dmesg_show | grep -q 'DISCARD.*sectors'; then
 		fail "No discards issued to device"
 	fi
@@ -202,10 +202,10 @@ testfs() {
 	fi
 }
 
-testfs btrfs
 testfs ext4
 testfs ext3
 testfs xfs
+testfs btrfs
 
 set +e
 echo $BGREEN"SUCCESS ($iter)"$NORM

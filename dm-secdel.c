@@ -19,7 +19,7 @@
 MODULE_AUTHOR("<vt@altlinux.org>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("dm-linear with secure deletion on discard");
-MODULE_VERSION("1.0.3");
+MODULE_VERSION("1.0.4");
 
 #define DM_MSG_PREFIX "secdel"
 
@@ -169,18 +169,17 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
     sector_t nr_sects, gfp_t gfp_mask, int mode)
 {
 	int ret = 0;
-	struct bio *bio;
-	unsigned int sz;
 
 	while (nr_sects) {
-		DMDEBUG("bio_alloc<%lu[%lu]> %lu", sector, nr_sects,
-		    min(nr_sects, (sector_t)BIO_MAX_PAGES));
+		struct bio *bio;
+		unsigned int nrvecs = min(nr_sects,
+		    (sector_t)BIO_MAX_PAGES >> 3);
 
-		bio = bio_alloc(gfp_mask,
-		    min(nr_sects, (sector_t)BIO_MAX_PAGES));
+		DMDEBUG("bio_alloc<%lu[%lu]> %u", sector, nr_sects, nrvecs);
+		bio = bio_alloc(gfp_mask, nrvecs);
 		if (!bio) {
-			DMERR("issue_erase %lu[%lu]: no memory to allocate bio",
-			    sector, nr_sects);
+			DMERR("%s %lu[%lu]: no memory to allocate bio (%u)",
+			    __func__, sector, nr_sects, nrvecs);
 			ret = -ENOMEM;
 			break;
 		}
@@ -190,9 +189,10 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 		bio->bi_end_io = bio_end_erase;
 
 		while (nr_sects != 0) {
+			unsigned int sz;
 			struct page *page = NULL;
 
-			sz = min((sector_t) PAGE_SIZE >> 9, nr_sects);
+			sz = min((sector_t)PAGE_SIZE >> 9, nr_sects);
 			if (mode) {
 				page = alloc_page(gfp_mask);
 				if (!page) {
@@ -210,6 +210,8 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 			if (!page)
 				page = ZERO_PAGE(0);
 			ret = bio_add_page(bio, page, sz << 9, 0);
+			if (!ret && page != ZERO_PAGE(0))
+				__free_page(page);
 			nr_sects -= ret >> 9;
 			sector += ret >> 9;
 			if (ret < (sz << 9))
@@ -314,6 +316,12 @@ static int secdel_iterate_devices(struct dm_target *ti,
 	return fn(ti, lc->dev, lc->start, ti->len, data);
 }
 
+static void secdel_io_hints(struct dm_target *ti, struct queue_limits *limits)
+{
+	limits->discard_granularity = bdev_logical_block_size(lc->dev->bdev);
+	limits->max_discard_sectors = PAGE_SIZE >> 9;
+}
+
 #if IS_ENABLED(CONFIG_DAX_DRIVER)
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 static long secdel_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
@@ -387,6 +395,7 @@ static struct target_type secdel_target = {
 #endif
 	.status = secdel_status,
 	.prepare_ioctl = secdel_prepare_ioctl,
+	.io_hints = secdel_io_hints,
 	.iterate_devices = secdel_iterate_devices,
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 	.direct_access = secdel_dax_direct_access,
