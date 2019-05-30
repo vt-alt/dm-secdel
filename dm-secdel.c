@@ -124,7 +124,9 @@ static void secdel_map_bio(struct dm_target *ti, struct bio *bio)
 static void bio_end_erase(struct bio *bio)
 {
 	struct bio_vec *bvec;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,2,0)
 	int i;
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
 	struct bvec_iter_all iter_all;
 #endif
@@ -134,7 +136,9 @@ static void bio_end_erase(struct bio *bio)
 		    (long long unsigned int)bio->bi_iter.bi_sector,
 		    bio->bi_iter.bi_size >> 9,
 		    bio->bi_status);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,2,0)
+	bio_for_each_segment_all(bvec, bio, iter_all)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
 	bio_for_each_segment_all(bvec, bio, i, iter_all)
 #else
 	bio_for_each_segment_all(bvec, bio, i)
