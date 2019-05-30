@@ -125,13 +125,20 @@ static void bio_end_erase(struct bio *bio)
 {
 	struct bio_vec *bvec;
 	int i;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
+	struct bvec_iter_all iter_all;
+#endif
 
 	if (bio->bi_status)
 		DMERR("bio_end_erase %llu[%u] error=%d",
 		    (long long unsigned int)bio->bi_iter.bi_sector,
 		    bio->bi_iter.bi_size >> 9,
 		    bio->bi_status);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0)
+	bio_for_each_segment_all(bvec, bio, i, iter_all)
+#else
 	bio_for_each_segment_all(bvec, bio, i)
+#endif
 		if (bvec->bv_page != ZERO_PAGE(0))
 			__free_page(bvec->bv_page);
 	bio_put(bio);
