@@ -257,7 +257,26 @@ static int secdel_map(struct dm_target *ti, struct bio *bio)
 	return DM_MAPIO_REMAPPED;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+#ifdef CONFIG_BLK_DEV_ZONED
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(4,20,0)
+static int secdel_report_zones(struct dm_target *ti, sector_t sector,
+			       struct blk_zone *zones, unsigned int *nr_zones,
+			       gfp_t gfp_mask)
+{
+	struct linear_c *lc = (struct linear_c *)ti->private;
+	int ret;
+
+	/* Do report and remap it */
+	ret = blkdev_report_zones(lc->dev->bdev, linear_map_sector(ti, sector),
+				  zones, nr_zones, gfp_mask);
+	if (ret != 0)
+		return ret;
+
+	if (*nr_zones)
+		dm_remap_zone_report(ti, lc->start, zones, nr_zones);
+	return 0;
+}
+# elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
 static int secdel_end_io(struct dm_target *ti, struct bio *bio,
 			 blk_status_t *error)
 {
@@ -268,6 +287,7 @@ static int secdel_end_io(struct dm_target *ti, struct bio *bio,
 
 	return DM_ENDIO_DONE;
 }
+# endif
 #endif
 
 static void secdel_status(struct dm_target *ti, status_type_t type,
@@ -392,8 +412,12 @@ static struct target_type secdel_target = {
 	.ctr    = secdel_ctr,
 	.dtr    = secdel_dtr,
 	.map    = secdel_map,
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+#ifdef CONFIG_BLK_DEV_ZONED
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(4,20,0)
+	.report_zones = secdel_report_zones,
+# elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
 	.end_io = secdel_end_io,
+# endif
 #endif
 	.status = secdel_status,
 	.prepare_ioctl = secdel_prepare_ioctl,
