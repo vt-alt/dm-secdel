@@ -32,6 +32,13 @@ struct secdel_c {
 	sector_t start;
 };
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0)
+static inline struct audit_context *audit_context(void)
+{
+	return current->audit_context;
+}
+#endif
+
 /*
  * Construct a linear mapping: <dev_path> <offset>
  */
