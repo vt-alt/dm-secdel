@@ -1,9 +1,11 @@
 /*
+ * dm-secdel: secure deletion on discard
+ * (c) 2018-2019, vt@altlinux.org.
+ *
+ * Based on dm-linear:
  * Copyright (C) 2001-2003 Sistina Software (UK) Limited.
  *
- * (c) 2018, vt@altlinux.org: secure deletion on discard
- *
- * This file is released under the GPL.
+ * This file is licensed under the GPL-2.0-only.
  */
 
 #include <linux/module.h>
@@ -24,12 +26,15 @@ MODULE_VERSION("1.0.4");
 
 #define DM_MSG_PREFIX "secdel"
 
+unsigned long empty_ff_page[PAGE_SIZE / sizeof(unsigned long)];
+
 /*
  * Linear: maps a linear range of a device.
  */
 struct secdel_c {
 	struct dm_dev *dev;
 	sector_t start;
+	char patterns[];
 };
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0)
@@ -40,21 +45,27 @@ static inline struct audit_context *audit_context(void)
 #endif
 
 /*
- * Construct a linear mapping: <dev_path> <offset>
+ * Construct a linear mapping: <dev_path> <offset> [patterns]
  */
 static int secdel_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct secdel_c *lc;
 	unsigned long long tmp;
+	size_t passes = 0;
 	char dummy;
 	int ret;
+	int i;
 
-	if (argc != 2) {
+	if (argc < 2) {
 		ti->error = "Invalid argument count";
 		return -EINVAL;
 	}
 
-	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
+	if (argc > 2)
+		passes = strlen(argv[2]);
+
+	/* +2 to allow empty argv[2] to be replaced with "R" */
+	lc = kmalloc(sizeof(*lc) + passes + 2, GFP_KERNEL);
 	if (lc == NULL) {
 		ti->error = "Cannot allocate secdel context";
 		return -ENOMEM;
@@ -71,6 +82,27 @@ static int secdel_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (ret) {
 		ti->error = "Device lookup failed";
 		goto bad;
+	}
+
+	/* empty or unset argv[2] is replaced with "R" */
+	if (argc > 2 && passes > 1)
+		strcpy(lc->patterns, argv[2]);
+	else
+		strcpy(lc->patterns, "R");
+
+	/* sanity check erasure patterns */
+	passes = strlen(lc->patterns);
+	for (i = 0; i < passes; i++) {
+		switch (lc->patterns[i]) {
+		case '0':
+		case '1':
+		case 'R':
+			continue;
+		default:
+			ti->error = "Invalid character in patterns";
+			ret = -EINVAL;
+			goto bad;
+		}
 	}
 
 	/* permit discards no matter if underlying device supports them */
@@ -93,9 +125,9 @@ static int secdel_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 				     AUDIT_KERNEL_OTHER);
 		if (ab) {
 			audit_log_format(ab, "op=secdel action=start");
-			audit_log_format(ab, " dev=%s srcname=%s",
+			audit_log_format(ab, " dev=%s srcname=%s patterns=%s",
 					 dm_device_name(dm_table_get_md(ti->table)),
-					 argv[0]);
+					 argv[0], lc->patterns);
 			audit_log_end(ab);
 		}
 	}
@@ -175,7 +207,8 @@ static void bio_end_erase(struct bio *bio)
 #else
 	bio_for_each_segment_all(bvec, bio, i)
 #endif
-		if (bvec->bv_page != ZERO_PAGE(0))
+		if (bvec->bv_page != ZERO_PAGE(0) &&
+		    bvec->bv_page != virt_to_page(empty_ff_page))
 			__free_page(bvec->bv_page);
 	bio_put(bio);
 }
@@ -206,12 +239,14 @@ static int op_discard(struct bio *bio)
 
 /*
  * send amount of masking data to the device
- * @mode: 0 to write zeros, otherwise to write random data
+ * @mode: 0 to write zeros, 1 to write ff-s,
+ *       -1 to write random data
  */
 static int issue_erase(struct block_device *bdev, sector_t sector,
-    sector_t nr_sects, gfp_t gfp_mask, int mode)
+    sector_t nr_sects, int mode)
 {
 	int ret = 0;
+	const gfp_t gfp_mask = GFP_NOFS;
 
 	while (nr_sects) {
 		struct bio *bio;
@@ -236,12 +271,12 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 			struct page *page = NULL;
 
 			sz = min((sector_t)PAGE_SIZE >> 9, nr_sects);
-			if (mode) {
+			if (mode < 0) {
 				page = alloc_page(gfp_mask);
 				if (!page) {
 					DMERR("issue_erase %lu[%lu]: no memory to allocate page for random data",
 					    sector, nr_sects);
-					/* fallback to zero filling */
+					/* will fallback to zero filling */
 				} else {
 					void *ptr;
 
@@ -249,11 +284,13 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 					get_random_bytes(ptr, sz << 9);
 					kunmap_atomic(ptr);
 				}
-			}
+			} else if (mode == 1)
+				page = virt_to_page(empty_ff_page);
 			if (!page)
 				page = ZERO_PAGE(0);
 			ret = bio_add_page(bio, page, sz << 9, 0);
-			if (!ret && page != ZERO_PAGE(0))
+			if (!ret && page != ZERO_PAGE(0) &&
+			    page != virt_to_page(empty_ff_page))
 				__free_page(page);
 			nr_sects -= ret >> 9;
 			sector += ret >> 9;
@@ -275,6 +312,7 @@ static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 	struct block_device *bdev = lc->dev->bdev;
 	sector_t sector = sbio->bi_iter.bi_sector;
 	sector_t nr_sects = bio_sectors(sbio);
+	size_t passes, i;
 
 	if (!bio_sectors(sbio))
 		return 0;
@@ -288,7 +326,19 @@ static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 
 	bio_endio(sbio);
 
-	issue_erase(bdev, sector, nr_sects, GFP_NOFS, 1);
+	passes = strlen(lc->patterns);
+	for (i = 0; i < passes; i++) {
+		int mode;
+
+		switch (lc->patterns[i]) {
+		case '0': mode = 0; break;
+		case '1': mode = 1; break;
+		case 'R':
+		default:
+			  mode = -1;
+		}
+		issue_erase(bdev, sector, nr_sects, mode);
+	}
 	return 1;
 }
 
@@ -344,8 +394,9 @@ static void secdel_status(struct dm_target *ti, status_type_t type,
 		break;
 
 	case STATUSTYPE_TABLE:
-		snprintf(result, maxlen, "%s %llu", lc->dev->name,
-				(unsigned long long)lc->start);
+		snprintf(result, maxlen, "%s %llu %s", lc->dev->name,
+				(unsigned long long)lc->start,
+				lc->patterns);
 		break;
 	}
 }
@@ -482,7 +533,7 @@ int __init dm_secdel_init(void)
 
 	if (r < 0)
 		DMERR("register failed %d", r);
-
+	memset(empty_ff_page, 0xff, sizeof(empty_ff_page));
 	return r;
 }
 

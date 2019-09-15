@@ -1,11 +1,11 @@
 #!/bin/bash
-# SPDX-License-Identifier: GPL-2.0
+# SPDX-License-Identifier: GPL-2.0-only
 # vim: set sw=8:
 
 set -eu +f
 
 PATH=$PATH:/sbin:/usr/sbin
-declare -i bs=$((1024*1024)) count=100
+declare -i bs=$((1024*1024)) count=${COUNT:-100}
 mnt=/mnt
 cd $(dirname $0)
 
@@ -91,7 +91,7 @@ dmesg_show() {
 echo :: creating test disk of $((bs+count)) bytes
 log dd if=/dev/zero of=$img bs=$bs count=$count status=none
 lodev=$(losetup --show -f $img)
-dmsetup create secdel2 --table "0 $(blockdev --getsz $lodev) secdel $lodev 0"
+dmsetup create secdel2 --table "0 $(blockdev --getsz $lodev) secdel $lodev 0 1R0"
 dev=/dev/mapper/secdel2
 ls -lL $dev
 dmsetup table

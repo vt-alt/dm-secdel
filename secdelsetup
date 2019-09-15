@@ -2,8 +2,8 @@
 #
 # Setup script for dm-secdel
 #
-# (C) 2018 <vt@altlinux.org>
-# License: GPLv2
+# (C) 2018,2019 <vt@altlinux.org>
+# License: GPL-2.0-only
 #
 
 set -efu
@@ -17,7 +17,7 @@ error() {
 
 usage() {
 	echo "Usage:"
-	echo "  secdelsetup <source-device> [mapper-name]"
+	echo "  secdelsetup <source-device> [mapper-name] [erase-modes]"
 	echo "Options:"
 	echo "  -d|--detach <device>    detach device"
 	echo "  -D|--detach-all|--stop  detach all devices"
@@ -28,6 +28,14 @@ usage() {
 	echo "  --start                 start devices from secdeltab"
 	echo "  --save                  save active divices to secdeltab"
 	echo "  -h|--help               this text"
+	echo "erase-modes should be set to string of 0, 1, or R characters"
+	echo "without any separaters. Meaning of values are:"
+	echo "  0 one pass of bit zeros"
+	echo "  1 one pass of bit ones (i.e. 0xff bytes)"
+	echo "  R one pass of random data"
+	echo "For example, when erase-modes is set to \"1R0\" it will erase"
+	echo "with three passes if ones, random, and zero patterns."
+	echo "Default value for erase-modes is R (one pass of random)."
 	exit
 }
 
@@ -50,7 +58,7 @@ list_lsblk() {
 list_all() {
 	local m=${1:-}
 
-	check && dmsetup table --target secdel | while read devx x x x devn x; do
+	check && dmsetup table --target secdel | while read devx x x x devn x opts; do
 		dev=/dev/mapper/${devx%:}
 		[ "$m" ] && [ "$m" != $dev ] && continue
 		devidx=$(stat -L -c '%t:%T' $dev)
@@ -59,7 +67,7 @@ list_all() {
 			if [ "$devn" = "$dn" ]; then
 				uuid=
 				[ "${UUID:-}" ] && uuid=$(find_uuid_by_hex_minmaj $devidx)
-				echo "$dev ${uuid:-/dev/$dv}"
+				echo "$dev ${uuid:-/dev/$dv} $opts"
 				dev=
 				break
 			fi
@@ -142,7 +150,7 @@ attach() {
 	fi
 	srcdev=$(find_dev $srcdev)
 	sz=$(blockdev --getsz $srcdev)
-	dmsetup create $mapbase --table "0 $sz secdel $srcdev 0" && \
+	dmsetup create $mapbase --table "0 $sz secdel $srcdev 0 $opts" && \
 	echo "$mapname is attached to $srcdev"
 }
 
@@ -156,7 +164,7 @@ secdeltab_save() {
 
 secdeltab_start() {
 	while read tgt src opts; do
-		[ $(expr $tgt : ^# ) = 1 ] && continue
+		[ $(expr $tgt : "^#") = 1 ] && continue
 		attach $src $tgt $opts || :
 	done < $secdeltab
 }
