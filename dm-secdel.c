@@ -22,7 +22,7 @@
 MODULE_AUTHOR("<vt@altlinux.org>");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("dm-linear with secure deletion on discard");
-MODULE_VERSION("1.0.4");
+MODULE_VERSION("1.0.5");
 
 #define DM_MSG_PREFIX "secdel"
 
