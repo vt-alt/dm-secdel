@@ -23,7 +23,7 @@ log() {
 	eval "$@"
 }
 
-sysctl kernel.printk=8
+sysctl kernel.printk=7
 if auditctl -s | grep -q 'enabled 0'; then
 	echo : enable audit
 	auditctl -e 1 >/dev/null
@@ -80,7 +80,11 @@ dmesg_start() {
 }
 dmesg_show() {
 	if [ "$ldmesg" ]; then
-		dmesg | sed '/'$ldmesg'/,$!d;//d'
+		if dmesg | grep -q $ldmesg; then
+			dmesg | sed '/'$ldmesg'/,$!d;//d'
+		else
+			dmesg
+		fi
 	fi
 }
 
