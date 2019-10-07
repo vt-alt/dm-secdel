@@ -9,7 +9,6 @@
  */
 
 #include <linux/module.h>
-#include <linux/audit.h>
 #include <linux/init.h>
 #include <linux/blkdev.h>
 #include <linux/bio.h>
@@ -36,13 +35,6 @@ struct secdel_c {
 	sector_t start;
 	char patterns[];
 };
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0)
-static inline struct audit_context *audit_context(void)
-{
-	return current->audit_context;
-}
-#endif
 
 /*
  * Construct a linear mapping: <dev_path> <offset> [patterns]
@@ -118,19 +110,9 @@ static int secdel_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	ti->num_write_zeroes_bios = 1;
 #endif
 	ti->private = lc;
-	if (audit_enabled) {
-		struct audit_buffer *ab;
-
-		ab = audit_log_start(audit_context(), GFP_KERNEL,
-				     AUDIT_KERNEL_OTHER);
-		if (ab) {
-			audit_log_format(ab, "op=secdel action=start");
-			audit_log_format(ab, " dev=%s srcname=%s patterns=%s",
-					 dm_device_name(dm_table_get_md(ti->table)),
-					 argv[0], lc->patterns);
-			audit_log_end(ab);
-		}
-	}
+	DMINFO("start dev=%s src=%s patterns=%s",
+	       dm_device_name(dm_table_get_md(ti->table)),
+	       argv[0], lc->patterns);
 	return 0;
 
       bad:
@@ -142,17 +124,7 @@ static void secdel_dtr(struct dm_target *ti)
 {
 	struct secdel_c *lc = ti->private;
 
-	if (audit_enabled) {
-		struct audit_buffer *ab;
-
-		ab = audit_log_start(audit_context(), GFP_KERNEL,
-				     AUDIT_KERNEL_OTHER);
-		if (ab) {
-			audit_log_format(ab, "op=secdel action=stop dev=%s",
-					 dm_device_name(dm_table_get_md(ti->table)));
-			audit_log_end(ab);
-		}
-	}
+	DMINFO("stop dev=%s", dm_device_name(dm_table_get_md(ti->table)));
 	dm_put_device(ti, lc->dev);
 	kfree(lc);
 }
