@@ -328,7 +328,7 @@ static int secdel_report_zones(struct dm_target *ti, sector_t sector,
 			       struct blk_zone *zones, unsigned int *nr_zones,
 			       gfp_t gfp_mask)
 {
-	struct linear_c *lc = (struct linear_c *)ti->private;
+	struct secdel_c *lc = (struct secdel_c *)ti->private;
 	int ret;
 
 	/* Do report and remap it */
