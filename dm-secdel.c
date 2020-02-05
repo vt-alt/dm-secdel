@@ -225,11 +225,13 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 		unsigned int nrvecs = min(nr_sects,
 		    (sector_t)BIO_MAX_PAGES >> 3);
 
-		DMDEBUG("bio_alloc<%lu[%lu]> %u", sector, nr_sects, nrvecs);
+		DMDEBUG("bio_alloc<%llu[%llu]> %u", (unsigned long long)sector,
+		    (unsigned long long)nr_sects, nrvecs);
 		bio = bio_alloc(gfp_mask, nrvecs);
 		if (!bio) {
-			DMERR("%s %lu[%lu]: no memory to allocate bio (%u)",
-			    __func__, sector, nr_sects, nrvecs);
+			DMERR("%s %llu[%llu]: no memory to allocate bio (%u)",
+			    __func__, (unsigned long long)sector,
+			    (unsigned long long)nr_sects, nrvecs);
 			ret = -ENOMEM;
 			break;
 		}
@@ -246,8 +248,8 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 			if (mode < 0) {
 				page = alloc_page(gfp_mask);
 				if (!page) {
-					DMERR("issue_erase %lu[%lu]: no memory to allocate page for random data",
-					    sector, nr_sects);
+					DMERR("issue_erase %llu[%llu]: no memory to allocate page for random data",
+					    (unsigned long long)sector, (unsigned long long)nr_sects);
 					/* will fallback to zero filling */
 				} else {
 					void *ptr;
@@ -293,7 +295,8 @@ static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 
 	BUG_ON(sbio->bi_vcnt != 0);
 
-	DMDEBUG("DISCARD %lu: %u sectors", sbio->bi_iter.bi_sector,
+	DMDEBUG("DISCARD %llu: %u sectors",
+	    (unsigned long long)sbio->bi_iter.bi_sector,
 	    bio_sectors(sbio));
 
 	bio_endio(sbio);
