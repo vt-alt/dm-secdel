@@ -328,15 +328,14 @@ static int secdel_map(struct dm_target *ti, struct bio *bio)
 #ifdef CONFIG_BLK_DEV_ZONED
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(4,20,0)
 static int secdel_report_zones(struct dm_target *ti, sector_t sector,
-			       struct blk_zone *zones, unsigned int *nr_zones,
-			       gfp_t gfp_mask)
+			       struct blk_zone *zones, unsigned int *nr_zones)
 {
 	struct secdel_c *lc = (struct secdel_c *)ti->private;
 	int ret;
 
 	/* Do report and remap it */
-	ret = blkdev_report_zones(lc->dev->bdev, linear_map_sector(ti, sector),
-				  zones, nr_zones, gfp_mask);
+	ret = blkdev_report_zones(lc->dev->bdev, secdel_map_sector(ti, sector),
+				  zones, nr_zones);
 	if (ret != 0)
 		return ret;
 
