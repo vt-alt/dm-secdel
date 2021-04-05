@@ -326,7 +326,19 @@ static int secdel_map(struct dm_target *ti, struct bio *bio)
 }
 
 #ifdef CONFIG_BLK_DEV_ZONED
-# if LINUX_VERSION_CODE >= KERNEL_VERSION(4,20,0)
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
+/* d41003513e61dd9d4974cb441d30b63650b85654 in v5.5 */
+static int secdel_report_zones(struct dm_target *ti,
+		struct dm_report_zones_args *args, unsigned int nr_zones)
+{
+	struct secdel_c *lc = ti->private;
+	sector_t sector = secdel_map_sector(ti, args->next_sector);
+
+	args->start = lc->start;
+	return blkdev_report_zones(lc->dev->bdev, sector, nr_zones,
+				   dm_report_zones_cb, args);
+}
+# elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,20,0)
 static int secdel_report_zones(struct dm_target *ti, sector_t sector,
 			       struct blk_zone *zones, unsigned int *nr_zones)
 {
