@@ -209,6 +209,11 @@ static int op_discard(struct bio *bio)
 	return false;
 }
 
+/* Renamed in a8affc03a9b375e19bc81573de0c9108317d78c7 */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,12,0)
+# define BIO_MAX_VECS BIO_MAX_PAGES
+#endif
+
 /*
  * send amount of masking data to the device
  * @mode: 0 to write zeros, 1 to write ff-s,
@@ -223,7 +228,7 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 	while (nr_sects) {
 		struct bio *bio;
 		unsigned int nrvecs = min(nr_sects,
-		    (sector_t)BIO_MAX_PAGES >> 3);
+		    (sector_t)BIO_MAX_VECS >> 3);
 
 		DMDEBUG("bio_alloc<%llu[%llu]> %u", (unsigned long long)sector,
 		    (unsigned long long)nr_sects, nrvecs);
