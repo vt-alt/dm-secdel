@@ -337,11 +337,17 @@ static int secdel_report_zones(struct dm_target *ti,
 		struct dm_report_zones_args *args, unsigned int nr_zones)
 {
 	struct secdel_c *lc = ti->private;
+#  if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
 	sector_t sector = secdel_map_sector(ti, args->next_sector);
 
 	args->start = lc->start;
 	return blkdev_report_zones(lc->dev->bdev, sector, nr_zones,
 				   dm_report_zones_cb, args);
+#  else /* 912e887505a07123917e537b657859723ce5d472 */
+	return dm_report_zones(lc->dev->bdev, lc->start,
+			       secdel_map_sector(ti, args->next_sector),
+			       args, nr_zones);
+#  endif
 }
 # elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,20,0)
 static int secdel_report_zones(struct dm_target *ti, sector_t sector,
