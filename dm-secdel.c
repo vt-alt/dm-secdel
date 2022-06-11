@@ -437,7 +437,7 @@ static void secdel_io_hints(struct dm_target *ti, struct queue_limits *limits)
 	limits->max_discard_sectors = PAGE_SIZE >> 9;
 }
 
-#if IS_ENABLED(CONFIG_DAX_DRIVER)
+#if IS_ENABLED(CONFIG_DAX_DRIVER) || IS_ENABLED(CONFIG_FS_DAX)
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 static long secdel_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
 				    long nr_pages,
