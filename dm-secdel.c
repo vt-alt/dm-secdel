@@ -483,7 +483,7 @@ static long secdel_direct_access(struct dm_target *ti, sector_t sector,
 }
 # endif
 
-# if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0) && LINUX_VERSION_CODE < KERNEL_VERSION(5,17,0)
 static size_t secdel_dax_copy_from_iter(struct dm_target *ti, pgoff_t pgoff,
 					void *addr, size_t bytes, struct iov_iter *i)
 {
@@ -530,7 +530,7 @@ static struct target_type secdel_target = {
 #elif LINUX_VERSION_CODE > KERNEL_VERSION(4,5,0)
 	.direct_access = secdel_direct_access,
 #endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0) && LINUX_VERSION_CODE < KERNEL_VERSION(5,17,0)
 	.dax_copy_from_iter = secdel_dax_copy_from_iter,
 #endif
 };
