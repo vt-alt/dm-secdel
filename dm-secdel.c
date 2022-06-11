@@ -440,7 +440,11 @@ static void secdel_io_hints(struct dm_target *ti, struct queue_limits *limits)
 #if IS_ENABLED(CONFIG_DAX_DRIVER)
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 static long secdel_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
-				    long nr_pages, void **kaddr, pfn_t *pfn)
+				    long nr_pages,
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+				    enum dax_access_mode mode,
+#endif
+				    void **kaddr, pfn_t *pfn)
 {
 	long ret;
 	struct secdel_c *lc = ti->private;
@@ -452,7 +456,11 @@ static long secdel_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
 	ret = bdev_dax_pgoff(bdev, dev_sector, nr_pages * PAGE_SIZE, &pgoff);
 	if (ret)
 		return ret;
-	return dax_direct_access(dax_dev, pgoff, nr_pages, kaddr, pfn);
+	return dax_direct_access(dax_dev, pgoff, nr_pages,
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
+				 mode,
+#endif
+				 kaddr, pfn);
 }
 # elif LINUX_VERSION_CODE > KERNEL_VERSION(4,5,0)
 static long secdel_direct_access(struct dm_target *ti, sector_t sector,
