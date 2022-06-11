@@ -437,6 +437,15 @@ static void secdel_io_hints(struct dm_target *ti, struct queue_limits *limits)
 }
 
 #if IS_ENABLED(CONFIG_DAX_DRIVER) || IS_ENABLED(CONFIG_FS_DAX)
+static struct dax_device *secdel_dax_pgoff(struct dm_target *ti, pgoff_t *pgoff)
+{
+	struct secdel_c *lc = ti->private;
+	sector_t sector = secdel_map_sector(ti, *pgoff << PAGE_SECTORS_SHIFT);
+
+	*pgoff = (get_start_sect(lc->dev->bdev) + sector) >> PAGE_SECTORS_SHIFT;
+	return lc->dev->dax_dev;
+}
+
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 static long secdel_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
 				    long nr_pages,
