@@ -514,14 +514,8 @@ static size_t secdel_dax_recovery_write(struct dm_target *ti, pgoff_t pgoff,
 static size_t secdel_dax_copy_from_iter(struct dm_target *ti, pgoff_t pgoff,
 					void *addr, size_t bytes, struct iov_iter *i)
 {
-	struct secdel_c *lc = ti->private;
-	struct block_device *bdev = lc->dev->bdev;
-	struct dax_device *dax_dev = lc->dev->dax_dev;
-	sector_t dev_sector, sector = pgoff * PAGE_SECTORS;
+	struct dax_device *dax_dev = secdel_dax_pgoff(ti, &pgoff);
 
-	dev_sector = secdel_map_sector(ti, sector);
-	if (bdev_dax_pgoff(bdev, dev_sector, ALIGN(bytes, PAGE_SIZE), &pgoff))
-		return 0;
 	return dax_copy_from_iter(dax_dev, pgoff, addr, bytes, i);
 }
 # endif
