@@ -142,20 +142,6 @@ static sector_t secdel_map_sector(struct dm_target *ti, sector_t bi_sector)
 #define bio_set_dev(bio, x) (bio)->bi_bdev = (x)
 #endif
 
-static void secdel_map_bio(struct dm_target *ti, struct bio *bio)
-{
-	struct secdel_c *lc = ti->private;
-
-	bio_set_dev(bio, lc->dev->bdev);
-	if (bio_sectors(bio)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
-	    || bio_op(bio) == REQ_OP_ZONE_RESET
-#endif
-	    )
-		bio->bi_iter.bi_sector =
-			secdel_map_sector(ti, bio->bi_iter.bi_sector);
-}
-
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0)
 #define bi_status bi_error
 #endif
@@ -326,7 +312,10 @@ static int secdel_map_discard(struct dm_target *ti, struct bio *sbio)
 
 static int secdel_map(struct dm_target *ti, struct bio *bio)
 {
-	secdel_map_bio(ti, bio);
+	struct secdel_c *lc = ti->private;
+
+	bio_set_dev(bio, lc->dev->bdev);
+	bio->bi_iter.bi_sector = secdel_map_sector(ti, bio->bi_iter.bi_sector);
 	if (secdel_map_discard(ti, bio))
 		return DM_MAPIO_SUBMITTED;
 	return DM_MAPIO_REMAPPED;
