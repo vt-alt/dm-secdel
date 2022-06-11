@@ -490,6 +490,16 @@ static long secdel_direct_access(struct dm_target *ti, sector_t sector,
 }
 # endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
+static int secdel_dax_zero_page_range(struct dm_target *ti, pgoff_t pgoff,
+				      size_t nr_pages)
+{
+	struct dax_device *dax_dev = secdel_dax_pgoff(ti, &pgoff);
+
+	return dax_zero_page_range(dax_dev, pgoff, nr_pages);
+}
+#endif
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 static size_t secdel_dax_recovery_write(struct dm_target *ti, pgoff_t pgoff,
 					void *addr, size_t bytes, struct iov_iter *i)
@@ -519,6 +529,7 @@ static size_t secdel_dax_copy_from_iter(struct dm_target *ti, pgoff_t pgoff,
 # define secdel_dax_direct_access NULL
 # define secdel_direct_access NULL
 # define secdel_dax_copy_from_iter NULL
+# define secdel_dax_zero_page_range NULL
 # define secdel_dax_recovery_write NULL
 #endif /* !IS_ENABLED(CONFIG_DAX_DRIVER) */
 
@@ -550,6 +561,9 @@ static struct target_type secdel_target = {
 #endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0) && LINUX_VERSION_CODE < KERNEL_VERSION(5,17,0)
 	.dax_copy_from_iter = secdel_dax_copy_from_iter,
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
+	.dax_zero_page_range = secdel_dax_zero_page_range,
 #endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 	.dax_recovery_write = secdel_dax_recovery_write,
