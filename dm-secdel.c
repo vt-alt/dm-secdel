@@ -523,7 +523,14 @@ static struct target_type secdel_target = {
 	.name   = "secdel",
 	.version = {1, 0, 3},
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,0)
-	.features = DM_TARGET_PASSES_INTEGRITY | DM_TARGET_ZONED_HM,
+	.features = DM_TARGET_PASSES_INTEGRITY |
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0)
+		DM_TARGET_NOWAIT |
+# endif
+# if LINUX_VERSION_CODE >= KERNEL_VERSION(5,12,0)
+		DM_TARGET_PASSES_CRYPTO |
+# endif
+		DM_TARGET_ZONED_HM,
 #endif
 	.module = THIS_MODULE,
 	.ctr    = secdel_ctr,
