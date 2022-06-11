@@ -105,7 +105,9 @@ static int secdel_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0)
 	ti->num_secure_erase_bios = 1;
 #endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,18,0)
 	ti->num_write_same_bios = 1;
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 	ti->num_write_zeroes_bios = 1;
 #endif
