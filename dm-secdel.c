@@ -454,16 +454,8 @@ static long secdel_dax_direct_access(struct dm_target *ti, pgoff_t pgoff,
 #endif
 				    void **kaddr, pfn_t *pfn)
 {
-	long ret;
-	struct secdel_c *lc = ti->private;
-	struct block_device *bdev = lc->dev->bdev;
-	struct dax_device *dax_dev = lc->dev->dax_dev;
-	sector_t dev_sector, sector = pgoff * PAGE_SECTORS;
+	struct dax_device *dax_dev = secdel_dax_pgoff(ti, &pgoff);
 
-	dev_sector = secdel_map_sector(ti, sector);
-	ret = bdev_dax_pgoff(bdev, dev_sector, nr_pages * PAGE_SIZE, &pgoff);
-	if (ret)
-		return ret;
 	return dax_direct_access(dax_dev, pgoff, nr_pages,
 # if LINUX_VERSION_CODE >= KERNEL_VERSION(5,19,0)
 				 mode,
