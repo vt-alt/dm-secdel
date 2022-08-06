@@ -220,7 +220,13 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 
 		DMDEBUG("bio_alloc<%llu[%llu]> %u", (unsigned long long)sector,
 		    (unsigned long long)nr_sects, nrvecs);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,18,0)
 		bio = bio_alloc(gfp_mask, nrvecs);
+		if (bio)
+			bio_set_dev(bio, bdev);
+#else
+		bio = bio_alloc(bdev, nrvecs, REQ_OP_WRITE, gfp_mask);
+#endif
 		if (!bio) {
 			DMERR("%s %llu[%llu]: no memory to allocate bio (%u)",
 			    __func__, (unsigned long long)sector,
@@ -228,9 +234,7 @@ static int issue_erase(struct block_device *bdev, sector_t sector,
 			ret = -ENOMEM;
 			break;
 		}
-
 		bio->bi_iter.bi_sector = sector;
-		bio_set_dev(bio, bdev);
 		bio->bi_end_io = bio_end_erase;
 
 		while (nr_sects != 0) {
