@@ -380,9 +380,7 @@ static void secdel_status(struct dm_target *ti, status_type_t type,
 			  unsigned status_flags, char *result, unsigned maxlen)
 {
 	struct secdel_c *lc = ti->private;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,15,0)
 	size_t sz = 0;
-#endif
 
 	switch (type) {
 	case STATUSTYPE_INFO:
