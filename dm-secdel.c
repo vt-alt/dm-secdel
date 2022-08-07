@@ -13,6 +13,7 @@
 #include <linux/blkdev.h>
 #include <linux/bio.h>
 #include <linux/dax.h>
+#include <linux/gfp.h>
 #include <linux/slab.h>
 #include <linux/device-mapper.h>
 #include <linux/random.h>
@@ -25,7 +26,7 @@ MODULE_VERSION("1.0.7");
 
 #define DM_MSG_PREFIX "secdel"
 
-unsigned long empty_ff_page[PAGE_SIZE / sizeof(unsigned long)];
+static unsigned long *empty_ff_page;
 
 /*
  * Linear: maps a linear range of a device.
@@ -568,17 +569,26 @@ static struct target_type secdel_target = {
 
 int __init dm_secdel_init(void)
 {
-	int r = dm_register_target(&secdel_target);
+	int r;
 
-	if (r < 0)
+	empty_ff_page = (void *)__get_free_page(GFP_KERNEL);
+	if (!empty_ff_page)
+		return -ENOMEM;
+	memset(empty_ff_page, 0xff, PAGE_SIZE);
+
+	r = dm_register_target(&secdel_target);
+	if (r < 0) {
 		DMERR("register failed %d", r);
-	memset(empty_ff_page, 0xff, sizeof(empty_ff_page));
+		free_page((unsigned long)empty_ff_page);
+	}
 	return r;
 }
 
 void dm_secdel_exit(void)
 {
 	dm_unregister_target(&secdel_target);
+	/* This might be dangerous if there are writes in flight. */
+	free_page((unsigned long)empty_ff_page);
 }
 
 module_init(dm_secdel_init);
