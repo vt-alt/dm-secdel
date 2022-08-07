@@ -447,6 +447,9 @@ static void secdel_io_hints(struct dm_target *ti, struct queue_limits *limits)
 }
 
 #if IS_ENABLED(CONFIG_DAX_DRIVER) || IS_ENABLED(CONFIG_FS_DAX)
+# ifndef PAGE_SECTORS_SHIFT
+#  define PAGE_SECTORS_SHIFT (PAGE_SHIFT - SECTOR_SHIFT)
+# endif
 static struct dax_device *secdel_dax_pgoff(struct dm_target *ti, pgoff_t *pgoff)
 {
 	struct secdel_c *lc = ti->private;
