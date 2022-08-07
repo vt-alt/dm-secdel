@@ -403,6 +403,14 @@ static void secdel_status(struct dm_target *ti, status_type_t type,
 	}
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0)
+/* a782483cc1f8 ("block: remove the nr_sects field in struct hd_struct") */
+static inline sector_t bdev_nr_sectors(struct block_device *bdev)
+{
+	return bdev->bd_part->nr_sects;
+}
+#endif
+
 static int secdel_prepare_ioctl(struct dm_target *ti, struct block_device **bdev
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
 		, fmode_t *mode
