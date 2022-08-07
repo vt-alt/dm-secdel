@@ -19,15 +19,14 @@ CYAN=$'\e[0;36m'
 NORM=$'\e[m'
 
 log() {
-	echo "  $*"
-	eval "$@"
+	echo "+ $*"
+	"$@"
 }
 
+[ -z "$*" ] || export "$@"
+
+# 7 is just below DMDEBUG messages
 sysctl kernel.printk=7
-if auditctl -s | grep -q 'enabled 0'; then
-	echo : enable audit
-	auditctl -e 1 >/dev/null
-fi
 declare -xi iter=0
 declare -r img=$HOME/loop.img
 atexit() {
@@ -46,6 +45,8 @@ echo :: loading dm-secdel module
 lsmod | grep -q ^dm_secdel && rmmod dm_secdel 2>/dev/null || :
 modprobe dm-mod 2>/dev/null || : # sometimes required dependency
 insmod ./dm-secdel.ko || :
+# CONFIG_DYNAMIC_DEBUG isn't built in std-def/un-def
+# echo "file drivers/md/* +p" > /sys/kernel/debug/dynamic_debug/control
 
 if [ ! -e /sys/module/dm_secdel/srcversion ]; then
 	echo "ERROR: module is not loaded."
@@ -91,7 +92,11 @@ dmesg_show() {
 echo :: creating test disk of $((bs+count)) bytes
 log dd if=/dev/zero of=$img bs=$bs count=$count status=none
 lodev=$(losetup --show -f $img)
-dmsetup create secdel2 --table "0 $(blockdev --getsz $lodev) secdel $lodev 0 1R0"
+if [ "${DM-}" = "linear" ]; then
+	log dmsetup create secdel2 --table "0 $(blockdev --getsz $lodev) linear $lodev 0"
+else
+	log dmsetup create secdel2 --table "0 $(blockdev --getsz $lodev) secdel $lodev 0 ${DM:-1R0}"
+fi
 dev=/dev/mapper/secdel2
 ls -lL $dev
 dmsetup table
