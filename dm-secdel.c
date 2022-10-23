@@ -139,8 +139,10 @@ static sector_t secdel_map_sector(struct dm_target *ti, sector_t bi_sector)
 	return lc->start + dm_target_offset(ti, bi_sector);
 }
 
-#ifndef bio_set_dev
-#define bio_set_dev(bio, x) (bio)->bi_bdev = (x)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,15,0)
+# ifndef bio_set_dev
+# define bio_set_dev(bio, x) (bio)->bi_bdev = (x)
+# endif
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0)
