@@ -190,7 +190,7 @@ static void secdel_submit_bio(struct bio *bio)
 static int op_discard(struct bio *bio)
 {
 	if (
-#ifdef bio_op
+#if LINUX_VERSION_CODE > KERNEL_VERSION(4,10,0) || defined(bio_op)
 	bio_op(bio) == REQ_OP_DISCARD
 #else
 	bio->bi_rw & REQ_DISCARD
